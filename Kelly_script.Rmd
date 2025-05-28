@@ -1,0 +1,133 @@
+---
+title: "AnnoQR2.0"
+author: "Bryan Queme"
+date: "`r Sys.Date()`"
+output: github_document
+---
+
+```{r library}
+# Try to load AnnoQR
+if (!requireNamespace("AnnoQR", quietly = TRUE)) {
+  # Check for devtools and install it if necessary
+  if (!requireNamespace("devtools", quietly = TRUE)) {
+    install.packages("devtools")
+  }
+  # Load devtools
+  library(devtools)
+  # Install AnnoQR from GitHub
+  devtools::install_github("USCbiostats/AnnoQR")
+}
+
+# Load AnnoQR
+library(AnnoQR)
+
+```
+
+```{r}
+# Only using the basic annotation types
+annotations_to_retrieve = c("chr", "pos", "ref", "alt",
+                      "ANNOVAR_ensembl_Effect",
+                      "ANNOVAR_ensembl_summary",
+                      "SnpEff_ensembl_Effect",
+                      "SnpEff_ensembl_Gene_ID",
+                      "SnpEff_ensembl_summary",
+                      "VEP_ensembl_Consequence",
+                      "VEP_ensembl_summary",
+                      "rs_dbSNP151")
+```
+
+
+
+```{r, data intake}
+url <- choose.files()
+cdata <- read.csv(url)
+
+```
+
+```{r}
+
+# EXAMPLE
+
+snps <- regionQ("18", 1, 50000, annotations_to_retrieve)
+head(snps)
+
+```
+
+## Sequential
+
+```{r}
+
+# Function to apply regionQ and bind the original row to the output
+annotate_region <- function(row) {
+  snps <- regionQ(row[["chr"]], row[["start"]], row[["end"]], annotations_to_retrieve)
+  if (nrow(snps) > 0) {
+    cbind(
+      chr_input = row[["chr"]],
+      start_input = row[["start"]],
+      end_input = row[["end"]],
+      Signal = row[["Signal"]],
+      snps
+    )
+  } else {
+    NULL
+  }
+}
+
+# Apply to all rows and combine results
+all_results <- do.call(rbind, apply(cdata, 1, annotate_region))
+
+# View output
+head(all_results)
+
+```
+
+# Parallel
+
+```{r}
+# Install if needed
+#install.packages("future.apply")
+
+library(future.apply)
+# all available logical cores - 1
+# plan(multisession)  # Or multicore (Mac/Linux only)
+plan(multisession, workers = 4)  # Use exactly 4 cores
+
+# Wrapper function
+annotate_region <- function(row) {
+  tryCatch({
+    snps <- regionQ(row[["chr"]], row[["start"]], row[["end"]], annotations_to_retrieve)
+    if (nrow(snps) > 0) {
+      cbind(
+        chr_input = row[["chr"]],
+        start_input = row[["start"]],
+        end_input = row[["end"]],
+        Signal = row[["Signal"]],
+        snps
+      )
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+}
+
+
+results_list <- future_lapply(1:nrow(cdata), function(i) {
+  annotate_region(cdata[i, ])
+})
+
+# Combine and write to CSV
+all_results <- do.call(rbind, results_list)
+
+```
+
+
+
+```{r, export CSV}
+write.csv(all_results, "annotated_regions_results.csv", row.names = FALSE)
+
+```
+
+
+
+
+
